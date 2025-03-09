@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
-import { StyleSheet, View, useColorScheme, Platform, Image, TextInput, Modal, Pressable } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, View, Platform, Image, TextInput, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Card, Text, Button, Surface } from 'react-native-paper';
-import { Navigation, Star, Clock, MapPin, Search, X } from 'lucide-react-native';
+import { Text, Button, Surface } from 'react-native-paper';
+import { Star, Clock, MapPin, Search, X, Navigation } from 'lucide-react-native';
+import MapView, { Marker } from 'react-native-maps'; // Import MapView and Marker
 
+// Mock Pharmacies Data
 const mockPharmacies = [
   {
     id: '1',
@@ -39,69 +41,10 @@ const mockPharmacies = [
     openUntil: '10:00 PM',
     address: '456 Rasulgarh, Bhubaneswar, Odisha',
   },
-  // Add more pharmacies with the `medicines` array
 ];
 
-function WebMap({ selectedPharmacy, onMarkerClick }) {
-  const [map, setMap] = useState(null);
-
-  useEffect(() => {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    document.head.appendChild(link);
-
-    return () => {
-      document.head.removeChild(link);
-    };
-  }, []);
-
-  const { MapContainer, TileLayer, Marker, Popup } = require('react-leaflet');
-  const L = require('leaflet');
-
-  const customIcon = new L.Icon({
-    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    shadowSize: [41, 41],
-  });
-
-  return (
-    <MapContainer
-      center={selectedPharmacy ? [selectedPharmacy.coordinate.latitude, selectedPharmacy.coordinate.longitude] : [37.78825, -122.4324]}
-      zoom={selectedPharmacy ? 16 : 14}
-      style={{ height: '100%', width: '100%' }}
-      whenCreated={setMap}
-    >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-      {mockPharmacies.map((pharmacy) => (
-        <Marker
-          key={pharmacy.id}
-          position={[pharmacy.coordinate.latitude, pharmacy.coordinate.longitude]}
-          icon={customIcon}
-          eventHandlers={{
-            click: () => onMarkerClick(pharmacy),
-          }}
-        >
-          <Popup>
-            <Text>{pharmacy.name}</Text>
-            <Text>₹{(pharmacy.medicines[0].price * 75).toFixed(2)}</Text>
-          </Popup>
-        </Marker>
-      ))}
-    </MapContainer>
-  );
-}
-
-function NativeMap({ selectedPharmacy, onMarkerClick }) {
-  const MapView = require('react-native-maps').default;
-  const { Marker } = require('react-native-maps');
-
+// Inline NativeMap Component
+const NativeMap = ({ selectedPharmacy, onMarkerClick }) => {
   return (
     <MapView
       style={styles.map}
@@ -122,7 +65,7 @@ function NativeMap({ selectedPharmacy, onMarkerClick }) {
       ))}
     </MapView>
   );
-}
+};
 
 export default function MapScreen() {
   const [selectedPharmacy, setSelectedPharmacy] = useState(null);
@@ -130,8 +73,7 @@ export default function MapScreen() {
   const [showModal, setShowModal] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [showMedicinesModal, setShowMedicinesModal] = useState(false);
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const [showRelatedSearch, setShowRelatedSearch] = useState(false);
 
   // Filter pharmacies based on search query
   const filteredPharmacies = mockPharmacies.filter((pharmacy) =>
@@ -197,7 +139,7 @@ export default function MapScreen() {
               mode="contained"
               onPress={onClose}
               style={styles.modalButton}
-              labelStyle={{ color: '#ffffff' }} // Text color set to white
+              labelStyle={{ color: '#ffffff' }}
             >
               Close
             </Button>
@@ -216,17 +158,49 @@ export default function MapScreen() {
           placeholderTextColor="#666666"
           style={[styles.searchBar, { color: '#333333' }]}
           value={searchQuery}
-          onChangeText={setSearchQuery}
+          onChangeText={(text) => {
+            setSearchQuery(text);
+            setShowRelatedSearch(text.length > 0);
+          }}
+          onFocus={() => {
+            setShowRelatedSearch(searchQuery.length > 0);
+            setShowDetails(false); // Close the profile card
+          }}
+          onBlur={() => setShowRelatedSearch(false)}
         />
         <Button
           mode="contained"
           onPress={handleSearch}
           style={styles.searchButton}
           icon={() => <Search size={18} color="#ffffff" />}
-          labelStyle={{ color: '#ffffff' }} // Text color set to white
+          labelStyle={{ color: '#ffffff' }}
         >
           Search
         </Button>
+
+        {showRelatedSearch && (
+          <View style={styles.relatedSearchContainer}>
+            {mockPharmacies
+              .flatMap((pharmacy) => pharmacy.medicines)
+              .filter((medicine) =>
+                medicine.name.toLowerCase().includes(searchQuery.toLowerCase())
+              )
+              .map((medicine, index) => (
+                <Pressable
+                  key={index}
+                  style={styles.relatedSearchItem}
+                  onPress={() => {
+                    setSearchQuery(medicine.name);
+                    setShowRelatedSearch(false);
+                    setShowModal(true);
+                    setShowDetails(false); // Close the profile card if open
+                  }}
+                >
+                  <Text style={{ color: '#333333' }}>{medicine.name}</Text>
+                </Pressable>
+              ))}
+          </View>
+        )}
       </View>
 
       {/* Map */}
@@ -266,7 +240,7 @@ export default function MapScreen() {
               mode="contained"
               onPress={() => setShowModal(false)}
               style={styles.modalButton}
-              labelStyle={{ color: '#ffffff' }} // Text color set to white
+              labelStyle={{ color: '#ffffff' }}
             >
               Close
             </Button>
@@ -351,7 +325,7 @@ export default function MapScreen() {
                   window.open(url, '_blank');
                 }}
                 style={styles.directionsButton}
-                labelStyle={{ fontSize: 14, color: '#ffffff' }} // Text color set to white
+                labelStyle={{ fontSize: 14, color: '#ffffff' }}
               >
                 Get Directions
               </Button>
@@ -362,7 +336,7 @@ export default function MapScreen() {
               mode="outlined"
               onPress={() => setShowMedicinesModal(true)}
               style={styles.showAllMedicinesButton}
-              labelStyle={{ color: '#333333' }} // Text color set to black
+              labelStyle={{ color: '#333333' }}
             >
               Show All Medicines
             </Button>
@@ -390,7 +364,7 @@ const styles = StyleSheet.create({
   },
   searchBarContainer: {
     position: 'absolute',
-    top: 40, // Moved the search bar slightly lower
+    top: 40,
     left: 20,
     right: 20,
     borderRadius: 12,
@@ -412,6 +386,22 @@ const styles = StyleSheet.create({
   searchButton: {
     borderRadius: 12,
     backgroundColor: '#2563eb',
+  },
+  relatedSearchContainer: {
+    position: 'absolute',
+    top: 50,
+    left: 0,
+    right: 0,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    elevation: 3,
+    zIndex: 2,
+    padding: 8,
+  },
+  relatedSearchItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#cccccc',
   },
   map: {
     width: '100%',
