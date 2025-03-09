@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, FlatList, Image, Pressable, Modal, Dimensions, ScrollView, Animated } from 'react-native';
+import { View, StyleSheet, FlatList, Image, Pressable, Modal, Dimensions, ScrollView, Animated, TextInput, Platform } from 'react-native';
 import { Searchbar, Card, Text, Chip, Button, Surface, Provider } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { SlidersHorizontal, Navigation, Star, Clock, MapPin } from 'lucide-react-native';
+import { SlidersHorizontal, Navigation, Star, Clock, MapPin, Minus, Plus, ShoppingBag } from 'lucide-react-native';
+import Slider from '@react-native-community/slider';
+import RazorpayCheckout from 'react-native-razorpay';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import MapView, { Marker } from 'react-native-maps';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 const mockPharmacies = [
   {
@@ -210,13 +214,22 @@ export default function SearchScreen() {
   const [showMedicinesModal, setShowMedicinesModal] = useState(false);
   const [selectedPharmacy, setSelectedPharmacy] = useState(null);
   const [currentMedicineIndex, setCurrentMedicineIndex] = useState(0);
+  const [maxDistance, setMaxDistance] = useState(5);
+  const [minStock, setMinStock] = useState(0);
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [selectedMedicine, setSelectedMedicine] = useState(null);
+  const [quantity, setQuantity] = useState(1);
+  const [showDateTimeModal, setShowDateTimeModal] = useState(false);
+  const [selectedDateTime, setSelectedDateTime] = useState(new Date());
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+  const [uniqueSlipCode, setUniqueSlipCode] = useState(null);
+  const [isDatePickerVisible, setDatePickerVisibility] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const modalAnim = useRef(new Animated.Value(0)).current;
 
-  const filters = ['Nearest', 'Rating', 'Price: Low to High', 'In Stock'];
+  const filters = ['Nearest', 'Price: Low to High'];
 
-  // Function to filter and sort pharmacies
   const getFilteredPharmacies = () => {
     let filteredPharmacies = [...mockPharmacies];
 
@@ -224,24 +237,20 @@ export default function SearchScreen() {
       filteredPharmacies = filteredPharmacies.filter(pharmacy =>
         pharmacy.medicines.some(medicine =>
           medicine.name.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      );
+       ) );
     }
+
+    filteredPharmacies = filteredPharmacies.filter(pharmacy =>
+      pharmacy.distance <= maxDistance &&
+      pharmacy.medicines.some(medicine => medicine.stock >= minStock)
+    );
 
     switch (activeFilter) {
       case 'Nearest':
         filteredPharmacies.sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
         break;
-      case 'Rating':
-        filteredPharmacies.sort((a, b) => b.rating - a.rating);
-        break;
       case 'Price: Low to High':
         filteredPharmacies.sort((a, b) => a.medicines[0].price - b.medicines[0].price);
-        break;
-      case 'In Stock':
-        filteredPharmacies = filteredPharmacies.filter(pharmacy =>
-          pharmacy.medicines.some(medicine => medicine.stock > 0)
-        );
         break;
       default:
         break;
@@ -250,7 +259,6 @@ export default function SearchScreen() {
     return filteredPharmacies;
   };
 
-  // Rotate through medicines every 2 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       if (!searchQuery) {
@@ -274,7 +282,6 @@ export default function SearchScreen() {
     return () => clearInterval(interval);
   }, [selectedPharmacy, searchQuery]);
 
-  // Modal animation
   useEffect(() => {
     if (showFiltersModal) {
       Animated.timing(modalAnim, {
@@ -294,6 +301,31 @@ export default function SearchScreen() {
   const openMedicinesModal = (pharmacy) => {
     setSelectedPharmacy(pharmacy);
     setShowMedicinesModal(true);
+  };
+
+  const openOrderModal = (medicine, pharmacy) => {
+    setSelectedMedicine(medicine);
+    setSelectedPharmacy(pharmacy); // Ensure pharmacy is passed
+    setShowOrderModal(true);
+  };
+
+  const handleCheckout = () => {
+    setShowOrderModal(false);
+    setDatePickerVisibility(true);
+  };
+
+  const handleConfirm = (selectedDate) => {
+    setDatePickerVisibility(false);
+    if (selectedDate) {
+      setSelectedDateTime(selectedDate);
+      setShowDateTimeModal(true);
+    }
+  };
+
+  const handlePayment = () => {
+    setShowDateTimeModal(false);
+    setUniqueSlipCode(`SLIP-${Math.floor(Math.random() * 1000000)}`);
+    setShowConfirmationModal(true);
   };
 
   const renderMedicineItem = (item) => {
@@ -322,16 +354,12 @@ export default function SearchScreen() {
     );
 
     return (
-      <Card
-        style={[styles.card, { backgroundColor: '#ffffff' }]}
-        mode="elevated">
+      <Card style={[styles.card, { backgroundColor: '#ffffff' }]} mode="elevated">
         <Image source={{ uri: item.image }} style={styles.cardImage} />
         <Card.Content style={styles.cardContent}>
           <View style={styles.cardHeader}>
             <View style={styles.nameContainer}>
-              <Text
-                variant="titleMedium"
-                style={{ color: '#333333', fontSize: 18 }}>
+              <Text variant="titleMedium" style={{ color: '#333333', fontSize: 18 }}>
                 {item.name}
               </Text>
               <View style={styles.ratingContainer}>
@@ -342,7 +370,7 @@ export default function SearchScreen() {
             <Chip
               icon={() => <Navigation size={14} color="#1e40af" />}
               style={[styles.distanceChip, { backgroundColor: '#dbeafe' }]}
-              textStyle={{ color: '#2563eb' }}> {/* Updated text color to blue */}
+              textStyle={{ color: '#2563eb' }}>
               {item.distance} km
             </Chip>
           </View>
@@ -350,51 +378,47 @@ export default function SearchScreen() {
           <View style={styles.infoContainer}>
             <View style={styles.addressContainer}>
               <MapPin size={14} color="#666666" />
-              <Text
-                variant="bodySmall"
-                style={{ color: '#666666', marginLeft: 4 }}>
+              <Text variant="bodySmall" style={{ color: '#666666', marginLeft: 4 }}>
                 {item.address}
               </Text>
             </View>
             <View style={styles.timeContainer}>
               <Clock size={14} color="#666666" />
-              <Text
-                variant="bodySmall"
-                style={{ color: '#666666', marginLeft: 4 }}>
+              <Text variant="bodySmall" style={{ color: '#666666', marginLeft: 4 }}>
                 Open until {item.openUntil}
               </Text>
             </View>
           </View>
 
           {searchedMedicine ? (
-            <View style={[styles.medicineInfo, { backgroundColor: '#f3f4f6' }]}>
-              <View>
-                <Text variant="bodyMedium" style={{ color: '#333333' }}>
-                  {searchedMedicine.name}
-                </Text>
-                <Text variant="titleMedium" style={styles.price}>
-                  ₹{(searchedMedicine.price * 75).toFixed(2)}
-                </Text>
-              </View>
-              <Text variant="bodySmall" style={styles.stockText}>
-                In Stock ({searchedMedicine.stock})
-              </Text>
-            </View>
-          ) : (
-            <Animated.View style={{ opacity: fadeAnim }}>
+            <Pressable onPress={() => openOrderModal(searchedMedicine, item)}>
               <View style={[styles.medicineInfo, { backgroundColor: '#f3f4f6' }]}>
                 <View>
                   <Text variant="bodyMedium" style={{ color: '#333333' }}>
-                    {item.medicines[currentMedicineIndex].name}
+                    {searchedMedicine.name}
                   </Text>
                   <Text variant="titleMedium" style={styles.price}>
-                    ₹{(item.medicines[currentMedicineIndex].price * 75).toFixed(2)}
+                    ₹{(searchedMedicine.price * 75).toFixed(2)}
                   </Text>
                 </View>
-                <Text variant="bodySmall" style={styles.stockText}>
-                  In Stock ({item.medicines[currentMedicineIndex].stock})
-                </Text>
+                <ShoppingBag size={20} color="#2563eb" />
               </View>
+            </Pressable>
+          ) : (
+            <Animated.View style={{ opacity: fadeAnim }}>
+              <Pressable onPress={() => openOrderModal(item.medicines[currentMedicineIndex], item)}>
+                <View style={[styles.medicineInfo, { backgroundColor: '#f3f4f6' }]}>
+                  <View>
+                    <Text variant="bodyMedium" style={{ color: '#333333' }}>
+                      {item.medicines[currentMedicineIndex].name}
+                    </Text>
+                    <Text variant="titleMedium" style={styles.price}>
+                      ₹{(item.medicines[currentMedicineIndex].price * 75).toFixed(2)}
+                    </Text>
+                  </View>
+                  <ShoppingBag size={20} color="#2563eb" />
+                </View>
+              </Pressable>
             </Animated.View>
           )}
 
@@ -423,10 +447,7 @@ export default function SearchScreen() {
               placeholder="Search medicines..."
               onChangeText={setSearchQuery}
               value={searchQuery}
-              style={[
-                styles.searchBar,
-                { backgroundColor: '#f3f4f6' }
-              ]}
+              style={[styles.searchBar, { backgroundColor: '#f3f4f6' }]}
               iconColor="#2563eb"
               placeholderTextColor="#666666"
               inputStyle={{ color: '#333333' }}
@@ -434,11 +455,8 @@ export default function SearchScreen() {
             <Button
               mode="contained"
               onPress={() => setShowFiltersModal(true)}
-              style={[
-                styles.filterButton,
-                { backgroundColor: '#2563eb' }
-              ]}
-              labelStyle={{ color: '#ffffff' }} 
+              style={[styles.filterButton, { backgroundColor: '#2563eb' }]}
+              labelStyle={{ color: '#ffffff' }}
               icon={() => <SlidersHorizontal size={18} color="#ffffff" />}>
               Filter
             </Button>
@@ -460,7 +478,7 @@ export default function SearchScreen() {
           animationType="fade"
           onRequestClose={() => setShowMedicinesModal(false)}>
           <View style={styles.modalOverlay}>
-            <View style={[styles.squareModalContainer, { backgroundColor: '#ffffff' }]}>
+            <View style={[styles.squareModalContainer, { backgroundColor: '#ffffff', maxHeight: height * 0.8 }]}>
               <Text variant="titleLarge" style={{ color: '#333333', marginBottom: 16 }}>
                 {selectedPharmacy?.name} Medicines
               </Text>
@@ -470,6 +488,149 @@ export default function SearchScreen() {
               <Button
                 mode="contained"
                 onPress={() => setShowMedicinesModal(false)}
+                style={styles.modalButton}>
+                Close
+              </Button>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Order Modal */}
+        <Modal
+          visible={showOrderModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowOrderModal(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.squareModalContainer, { backgroundColor: '#ffffff', maxHeight: height * 0.6 }]}>
+              <Text variant="titleLarge" style={{ color: '#333333', marginBottom: 16 }}>
+                {selectedPharmacy?.name}
+              </Text>
+              <Text variant="bodyMedium" style={{ color: '#666666', marginBottom: 8 }}>
+                {selectedPharmacy?.address}
+              </Text>
+              <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 16 }}>
+                {selectedMedicine?.name}
+              </Text>
+              <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 16 }}>
+                ₹{(selectedMedicine?.price * 75 * quantity).toFixed(2)}
+              </Text>
+              <View style={styles.quantityContainer}>
+                <Button
+                  mode="contained"
+                  icon={() => <Minus size={16} color="#ffffff" />}
+                  onPress={() => setQuantity(Math.max(quantity - 1, 1))}
+                  style={styles.quantityButton}>
+                </Button>
+                <Text variant="titleMedium" style={{ color: '#333333', marginHorizontal: 16 }}>
+                  {quantity}
+                </Text>
+                <Button
+                  mode="contained"
+                  icon={() => <Plus size={16} color="#ffffff" />}
+                  onPress={() => setQuantity(quantity + 1)}
+                  style={styles.quantityButton}>
+                </Button>
+              </View>
+              <Button
+                mode="contained"
+                onPress={handleCheckout}
+                style={styles.modalButton}>
+                Checkout
+              </Button>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Date & Time Picker */}
+        <DateTimePickerModal
+          isVisible={isDatePickerVisible}
+          mode="datetime"
+          onConfirm={handleConfirm}
+          onCancel={() => setDatePickerVisibility(false)}
+        />
+
+        {/* Date & Time Confirmation Modal */}
+        <Modal
+          visible={showDateTimeModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowDateTimeModal(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.squareModalContainer, { backgroundColor: '#ffffff', maxHeight: height * 0.6 }]}>
+              <Text variant="titleLarge" style={{ color: '#333333', marginBottom: 16 }}>
+                Confirm Date & Time
+              </Text>
+              <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 16 }}>
+                Selected Date: {selectedDateTime.toLocaleDateString()}
+              </Text>
+              <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 16 }}>
+                Selected Time: {selectedDateTime.toLocaleTimeString()}
+              </Text>
+              <Button
+                mode="contained"
+                onPress={handlePayment}
+                style={styles.modalButton}>
+                Continue to Payment
+              </Button>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Confirmation Modal */}
+        <Modal
+          visible={showConfirmationModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowConfirmationModal(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.squareModalContainer, { backgroundColor: '#ffffff', maxHeight: height * 0.8 }]}>
+              <ScrollView contentContainerStyle={styles.modalScrollContent}>
+                <Text variant="titleLarge" style={{ color: '#333333', marginBottom: 16 }}>
+                  Order Confirmation
+                </Text>
+                <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 8 }}>
+                  Unique Slip Code: {uniqueSlipCode}
+                </Text>
+                <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 8 }}>
+                  Pharmacy Store Name: {selectedPharmacy?.name}
+                </Text>
+                <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 8 }}>
+                  Pharmacy Store Address: {selectedPharmacy?.address}
+                </Text>
+                <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 8 }}>
+                  Pharmacy Store Unique ID: {selectedPharmacy?.id}
+                </Text>
+                <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 8 }}>
+                  Pick-up Date: {selectedDateTime.toLocaleDateString()}
+                </Text>
+                <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 8 }}>
+                  Pick-up Time: {selectedDateTime.toLocaleTimeString()}
+                </Text>
+                <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 8 }}>
+                  Medicine Name: {selectedMedicine?.name}
+                </Text>
+                <Text variant="titleMedium" style={{ color: '#333333', marginBottom: 8 }}>
+                  Quantity: {quantity}
+                </Text>
+                <MapView
+                  style={styles.map}
+                  initialRegion={{
+                    latitude: 20.2961,
+                    longitude: 85.8245,
+                    latitudeDelta: 0.0922,
+                    longitudeDelta: 0.0421,
+                  }}>
+                  <Marker
+                    coordinate={{ latitude: 20.2961, longitude: 85.8245 }}
+                    title={selectedPharmacy?.name}
+                    description={selectedPharmacy?.address}
+                  />
+                </MapView>
+              </ScrollView>
+              <Button
+                mode="contained"
+                onPress={() => setShowConfirmationModal(false)}
                 style={styles.modalButton}>
                 Close
               </Button>
@@ -505,22 +666,60 @@ export default function SearchScreen() {
               </Text>
               <View style={styles.modalContent}>
                 {filters.map((filter) => (
-                  <FilterChip
-                    key={filter}
-                    label={filter}
-                    active={activeFilter === filter}
-                    onPress={() => {
-                      setActiveFilter(filter);
-                      setShowFiltersModal(false);
-                    }}
-                  />
+                  <React.Fragment key={filter}>
+                    <FilterChip
+                      label={filter}
+                      active={activeFilter === filter}
+                      onPress={() => {
+                        setActiveFilter(filter);
+                        setShowFiltersModal(false);
+                      }}
+                    />
+                    {filter === 'Nearest' && (
+                      <View style={styles.sliderContainer}>
+                        <Text variant="bodyMedium" style={{ color: '#333333', marginBottom: 8 }}>
+                          Max Distance (km): {maxDistance}
+                        </Text>
+                        <Slider
+                          value={maxDistance}
+                          onValueChange={setMaxDistance}
+                          minimumValue={1}
+                          maximumValue={10}
+                          step={1}
+                          minimumTrackTintColor="#2563eb"
+                          maximumTrackTintColor="#dddddd"
+                        />
+                      </View>
+                    )}
+                  </React.Fragment>
                 ))}
+                <View style={styles.quantityContainer}>
+                  <Text variant="bodyMedium" style={{ color: '#333333', marginBottom: 8 }}>
+                    Minimum Stock: {minStock}
+                  </Text>
+                  <View style={styles.quantityButtons}>
+                    <Button
+                      mode="contained"
+                      icon={() => <Minus size={16} color="#ffffff" />}
+                      onPress={() => setMinStock(Math.max(minStock - 1, 0))}
+                      style={styles.quantityButton}>
+                    </Button>
+                    <Button
+                      mode="contained"
+                      icon={() => <Plus size={16} color="#ffffff" />}
+                      onPress={() => setMinStock(minStock + 1)}
+                      style={styles.quantityButton}>
+                    </Button>
+                  </View>
+                </View>
               </View>
               <View style={styles.modalFooter}>
                 <Button
                   mode="outlined"
                   onPress={() => {
-                    setActiveFilter('Nearest'); // Reset to default filter
+                    setActiveFilter('Nearest');
+                    setMaxDistance(5);
+                    setMinStock(0);
                     setShowFiltersModal(false);
                   }}
                   style={styles.clearFilterButton}>
@@ -645,7 +844,7 @@ const styles = StyleSheet.create({
   stockText: {
     color: '#22c55e',
     fontWeight: '500',
-    fontSize:14,
+    fontSize: 14,
   },
   directionsButton: {
     backgroundColor: '#2563eb',
@@ -659,7 +858,6 @@ const styles = StyleSheet.create({
   },
   squareModalContainer: {
     width: width * 0.8,
-    height: width * 1.1,
     borderRadius: 16,
     padding: 20,
     backgroundColor: '#ffffff',
@@ -705,5 +903,31 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
     borderColor: '#2563eb',
+  },
+  sliderContainer: {
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  quantityContainer: {
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  quantityButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  quantityButton: {
+    borderRadius: 12,
+    backgroundColor: '#2563eb',
+    width: '48%',
+  },
+  map: {
+    width: '100%',
+    height: 200,
+    marginTop: 16,
+    borderRadius: 12,
+  },
+  modalScrollContent: {
+    paddingBottom: 20,
   },
 });
